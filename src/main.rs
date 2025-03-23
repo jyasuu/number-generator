@@ -33,9 +33,11 @@ struct NumberResponse {
 struct NumberGenerator {
     redis_client: redis::Client,
     prefix_configs: HashMap<String, PrefixConfig>,
+    local_cache: Arc<Mutex<HashMap<String, PrefixConfig>>>,
     metrics: Arc<Metrics>,
 }
 
+#[allow(dead_code)]
 #[derive(Clone)]
 struct Metrics {
     registry: Registry,
@@ -100,87 +102,143 @@ impl Metrics {
     }
 }
 
+#[allow(unused_variables)]
 impl NumberGenerator {
     async fn new(redis_url: &str) -> RedisResult<Self> {
         let client = redis::Client::open(redis_url)?;
         let registry = Registry::new();
         let metrics = Arc::new(Metrics::new(&registry));
+        let local_cache = Arc::new(Mutex::new(HashMap::new()));
+        let mut num_retries = 5;
+        let mut redis_client = None;
+        while num_retries > 0 {
+            match redis::Client::open(redis_url) {
+                Ok(client) => {
+                    redis_client = Some(client);
+                    break;
+                }
+                Err(e) => {
+                    println!("Failed to connect to Redis: {}, retrying...", e);
+                    num_retries -= 1;
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                }
+            }
+        }
+
+        let redis_client = match redis_client {
+            Some(client) => client,
+            None => return Err(redis::RedisError::from((redis::ErrorKind::ClientError, "Failed to connect to Redis after multiple retries"))),
+        };
         Ok(Self {
-            redis_client: client,
+            redis_client: redis_client,
             prefix_configs: HashMap::new(),
+            local_cache,
             metrics,
         })
     }
 
-    async fn generate_number(&self, prefix_key: &str) -> RedisResult<String> {
+    async fn generate_number(&mut self, prefix_key: &str) -> RedisResult<String> {
         println!("Checking prefix configuration for: {}", prefix_key);
-        if let Some(config) = self.prefix_configs.get(prefix_key) {
-            println!("Found configuration: {:?}", config);
-            println!("Connecting to Redis...");
-            let mut con = match self.redis_client.get_async_connection().await {
-                Ok(conn) => {
-                    println!("Successfully connected to Redis");
-                    conn
+        let config = {
+            let cache = self.local_cache.lock().await;
+            match cache.get(prefix_key) {
+                Some(config) => {
+                    println!("Found configuration in local cache: {:?}", config);
+                    config.clone()
                 }
-                Err(e) => {
-                    println!("Failed to connect to Redis: {:?}", e);
-                    return Err(e);
+                None => {
+                    println!("Prefix not found in local cache, checking Redis...");
+                    let mut con = self.redis_client.get_async_connection().await?;
+                    let config_json: Option<String> = con.get(format!("prefix_config:{}", prefix_key)).await?;
+                    match config_json {
+                        Some(json) => {
+                            println!("Found configuration in Redis: {}", json);
+                            let config: PrefixConfig = serde_json::from_str(&json).map_err(|e| {
+                                redis::RedisError::from((redis::ErrorKind::TypeError,"", e.to_string()))
+                            })?;
+                            let mut cache = self.local_cache.lock().await;
+                            cache.insert(prefix_key.to_string(), config.clone());
+                            config
+                        }
+                        None => {
+                            println!("Prefix not found in Redis");
+                            return Err(redis::RedisError::from((
+                                redis::ErrorKind::TypeError,
+                                "Prefix not configured",
+                            )));
+                        }
+                    }
                 }
-            };
-
-            // Acquire distributed lock
-            let lock_key = format!("lock:{}", prefix_key);
-            let lock_id = uuid::Uuid::new_v4().to_string();
-            let lock_acquired: bool = con.set_nx(&lock_key, &lock_id).await?;
-            
-            if !lock_acquired {
-                println!("Failed to acquire lock for prefix: {}", prefix_key);
-                return Err(redis::RedisError::from((
-                    redis::ErrorKind::TryAgain,
-                    "Failed to acquire lock",
-                )));
             }
+        };
 
-            // Set lock expiration
-            con.expire(&lock_key, 5).await?;
-
-            println!("Generating sequence...");
-            let seq_future : std::pin::Pin<Box<dyn Future<Output = Result<i32, redis::RedisError>> + Send>> = con.incr(format!("seq:{}", prefix_key), 1) ;
-            let seq = seq_future.await;
-            let seq = match seq
-            {
-                Ok(seq) => {
-                    println!("Successfully generated sequence: {:?}", seq);
-                    seq
-                }
-                Err(e) => {
-                    println!("Failed to generate sequence: {:?}", e);
-                    return Err(e);
-                }
-            };
-
-            // Release lock
-            let current_lock_id: String = con.get(&lock_key).await?;
-            if current_lock_id == lock_id {
-                con.del(&lock_key).await?;
+        println!("Connecting to Redis...");
+        let mut con = match self.redis_client.get_async_connection().await {
+            Ok(conn) => {
+                println!("Successfully connected to Redis");
+                conn
             }
-            
-            let number = config.format
-                .replace("{SEQ}", &format!("{:0>width$}", seq, width = config.seq_length))
-                .replace("{year}", &chrono::Local::now().format("%Y").to_string());
-            println!("Formatted number: {}", number);
-            Ok(number)
-        } else {
-            println!("Prefix not found in configurations");
-            Err(redis::RedisError::from((
-                redis::ErrorKind::TypeError,
-                "Prefix not configured",
-            )))
+            Err(e) => {
+                println!("Failed to connect to Redis: {:?}", e);
+                return Err(e);
+            }
+        };
+
+        // Acquire distributed lock
+        let lock_key = format!("lock:{}", prefix_key);
+        let lock_id = uuid::Uuid::new_v4().to_string();
+        let lock_acquired: bool = con.set_nx(&lock_key, &lock_id).await?;
+
+        if !lock_acquired {
+            println!("Failed to acquire lock for prefix: {}", prefix_key);
+            return Err(redis::RedisError::from((
+                redis::ErrorKind::TryAgain,
+                "Failed to acquire lock",
+            )));
         }
+
+        // Set lock expiration
+        con.expire(&lock_key, 5).await?;
+
+        println!("Generating sequence...");
+        let seq_future : std::pin::Pin<Box<dyn Future<Output = Result<i32, redis::RedisError>> + Send>> = con.incr(format!("seq:{}", prefix_key), 1) ;
+        let seq = seq_future.await;
+        let seq = match seq
+        {
+            Ok(seq) => {
+                println!("Successfully generated sequence: {:?}", seq);
+                seq
+            }
+            Err(e) => {
+                println!("Failed to generate sequence: {:?}", e);
+                return Err(e);
+            }
+        };
+
+        // Release lock
+        let current_lock_id: String = con.get(&lock_key).await?;
+        if current_lock_id == lock_id {
+            con.del(&lock_key).await?;
+        }
+
+        let number = config.format
+            .replace("{SEQ}", &format!("{:0>width$}", seq, width = config.seq_length))
+            .replace("{year}", &chrono::Local::now().format("%Y").to_string());
+        println!("Formatted number: {}", number);
+        Ok(number)
     }
 
-    async fn register_prefix(&mut self, prefix_key: String, config: PrefixConfig) {
-        self.prefix_configs.insert(prefix_key, config);
+    async fn register_prefix(&mut self, prefix_key: String, config: PrefixConfig) -> RedisResult<()> {
+        let mut con = self.redis_client.get_async_connection().await?;
+        let config_json = serde_json::to_string(&config).map_err(|e| {
+            redis::RedisError::from((redis::ErrorKind::TypeError,"", e.to_string()))
+        })?;
+        con.set(format!("prefix_config:{}", prefix_key), config_json).await?;
+
+        let mut cache = self.local_cache.lock().await;
+        cache.insert(prefix_key.clone(), config.clone());
+        self.prefix_configs.insert(prefix_key.clone(), config);
+        Ok(())
     }
 }
 
@@ -202,7 +260,7 @@ async fn main() {
                 let number_gen = Arc::clone(&number_gen);
                 async move {
                     if let Some(prefix_key) = params.get("prefixKey") {
-                        let number_gen = number_gen.lock().await;
+                        let mut number_gen = number_gen.lock().await;
                         match number_gen.generate_number(prefix_key).await {
                             Ok(number) => Ok(warp::reply::json(&NumberResponse { number })),
                             Err(_) => Err(warp::reject::custom(PrefixNotConfigured)),
