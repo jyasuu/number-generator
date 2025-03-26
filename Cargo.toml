@@ -15,3 +15,9 @@ prometheus = { version = "0.13", features = ["process"] }
 thiserror = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+actix-web = "4"
+regex = "1"
+
+[[bin]]
+name = "number-generator"
+path = "src/main.rs"

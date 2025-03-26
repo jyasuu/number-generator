@@ -1,14 +1,15 @@
 version: "3.9"
 services:
-  number-generator:
-    build: .
-    ports:
-      - "3030:3030"
-    depends_on:
-      - redis
-    environment:
-      - REDIS_URL=redis://redis:6379/
   redis:
     image: "redis:latest"
     ports:
       - "6379:6379"
+
+  number-generator:
+    build: .
+    ports:
+      - "8080:8080"
+    depends_on:
+      - redis
+    environment:
+      RUST_LOG: actix_web=debug,actix_server=info
