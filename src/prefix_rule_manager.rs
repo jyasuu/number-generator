@@ -1,5 +1,3 @@
-use std::fmt;
-
 use redis::{Client, Commands};
 use serde::{Deserialize, Serialize};
 
@@ -26,12 +24,12 @@ pub enum PrefixRuleError {
     RedisError(#[from] redis::RedisError),
     #[error("Serialization error: {0}")]
     SerializationError(#[from] serde_json::Error),
-    #[error("Prefix not found: {0}")]
-    PrefixNotFound(String),
+    // #[error("Prefix not found: {0}")]
+    // PrefixNotFound(String),
     #[error("Prefix already exists: {0}")]
     PrefixAlreadyExists(String),
-    #[error("Invalid prefix format: {0}")]
-    InvalidPrefixFormat(String),
+    // #[error("Invalid prefix format: {0}")]
+    // InvalidPrefixFormat(String),
 }
 
 
@@ -58,7 +56,7 @@ impl PrefixRuleManager for RedisPrefixRuleManager {
 
         let config_json = serde_json::to_string(&config)?;
         println!("config_json: {}", config_json);
-        conn.set(&redis_key, config_json)?;
+        conn.set::<_, _, ()>(&redis_key, config_json)?;
         println!("Prefix registered successfully");
         Ok(())
     }

@@ -69,7 +69,7 @@ mod tests {
         }
 
         let expected_count = (num_threads * num_iterations) as u64;
-        let mut sequences = generator.sequences.lock().unwrap();
+        let sequences = generator.sequences.lock().unwrap();
         let final_count = sequences.get(&prefix_key).unwrap();
 
         assert_eq!(*final_count, expected_count);
