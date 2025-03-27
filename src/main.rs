@@ -6,7 +6,7 @@ mod prefix_rule_manager;
 mod sequence_generator;
 mod number_assembler;
 
-use prefix_rule_manager::{PrefixRuleManager, InMemoryPrefixRuleManager, PrefixConfig};
+use prefix_rule_manager::{PrefixRuleManager, RedisPrefixRuleManager, PrefixConfig};
 use sequence_generator::{SequenceGenerator, InMemorySequenceGenerator};
 use number_assembler::NumberAssembler;
 
@@ -70,8 +70,9 @@ async fn register_prefix(
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    let prefix_rule_manager: Arc<dyn PrefixRuleManager + Send + Sync> = Arc::new(InMemoryPrefixRuleManager::new());
-    let sequence_generator: Arc<dyn SequenceGenerator + Send + Sync> = Arc::new(InMemorySequenceGenerator::new(1000));
+    let redis_url = "redis://localhost:6379/";
+    let prefix_rule_manager: Arc<dyn PrefixRuleManager + Send + Sync> = Arc::new(RedisPrefixRuleManager::new(redis_url).unwrap());
+    let sequence_generator: Arc<dyn SequenceGenerator + Send + Sync> = Arc::new(InMemorySequenceGenerator::new());
     let number_assembler = Arc::new(NumberAssembler::new());
 
     let prefix_rule_manager_data = web::Data::new(prefix_rule_manager);
@@ -84,7 +85,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(sequence_generator_data.clone())
             .app_data(number_assembler_data.clone())
             .route("/api/numbers/{prefixKey}", web::get().to(generate_number))
-            .route("/api/prefix-configs/{prefixKey}", web::put().to(register_prefix))
+                .route("/api/prefix-configs/{prefixKey}", web::put().to(register_prefix))
     })
     .bind(("0.0.0.0", 8080))?
     .run()
@@ -100,8 +101,13 @@ mod tests {
 
     #[actix_web::test]
     async fn test_register_and_generate_number() {
-        let prefix_rule_manager: Arc<dyn PrefixRuleManager + Send + Sync> = Arc::new(InMemoryPrefixRuleManager::new());
-        let sequence_generator: Arc<dyn SequenceGenerator + Send + Sync> = Arc::new(InMemorySequenceGenerator::new(1000));
+        let redis_url = "redis://localhost:6379/";
+        let client = redis::Client::open(redis_url).unwrap();
+        let mut conn = client.get_connection().unwrap();
+        let _ : () = redis::cmd("FLUSHDB").execute(&mut conn);
+
+        let prefix_rule_manager: Arc<dyn PrefixRuleManager + Send + Sync> = Arc::new(RedisPrefixRuleManager::new(redis_url).unwrap());
+        let sequence_generator: Arc<dyn SequenceGenerator + Send + Sync> = Arc::new(InMemorySequenceGenerator::new());
         let number_assembler = Arc::new(NumberAssembler::new());
 
         let prefix_rule_manager_data = web::Data::new(prefix_rule_manager.clone());
@@ -130,7 +136,12 @@ mod tests {
             .to_request();
 
         let register_response = test::call_service(&app, register_request).await;
-        assert_eq!(register_response.status(), StatusCode::OK);
+        let status = register_response.status();
+        let body = actix_web::body::to_bytes(register_response.into_body()).await.unwrap();
+        let body_str = String::from_utf8(body.to_vec()).unwrap();
+        println!("Register response status: {}", status);
+        println!("Register response body: {}", body_str);
+        assert_eq!(status, StatusCode::OK);
 
         // Generate number
         let generate_request = test::TestRequest::get()
@@ -146,5 +157,10 @@ mod tests {
 
         let number_response: NumberResponse = serde_json::from_str(&body_str).unwrap();
         assert!(number_response.number.starts_with("TEST"));
+
+        // Clear Redis after the test
+        let client = redis::Client::open(redis_url).unwrap();
+        let mut conn = client.get_connection().unwrap();
+        redis::cmd("FLUSHDB").execute(&mut conn);
     }
 }
