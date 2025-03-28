@@ -1,6 +1,6 @@
 use regex::Regex;
 use std::collections::HashMap;
-use crate::prefix_rule_manager::PrefixRule;
+use crate::prefix_rule::PrefixRule;
 
 pub struct NumberAssembler {}
 
@@ -43,7 +43,7 @@ impl NumberAssembler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::prefix_rule_manager::PrefixRule;
+    use crate::prefix_rule::PrefixRule;
 
     #[test]
     fn test_assemble_number() {

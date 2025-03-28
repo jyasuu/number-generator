@@ -2,16 +2,17 @@ use actix_web::{web, App, HttpResponse, HttpServer, Responder, Result};
 use serde::{Deserialize, Serialize};
 use std::{sync::Arc, sync::Mutex};
 
+mod prefix_rule;
 mod prefix_rule_manager;
 mod sequence_generator;
 mod number_assembler;
 mod redis_prefix_rule_manager;
 
-use prefix_rule_manager::PrefixRuleManager;
 use crate::redis_prefix_rule_manager::RedisPrefixRuleManager;
-use sequence_generator::{SequenceGenerator, RedisSequenceGenerator};
-use number_assembler::NumberAssembler;
-use crate::prefix_rule_manager::PrefixRule;
+use crate::sequence_generator::{SequenceGenerator, RedisSequenceGenerator};
+use crate::number_assembler::NumberAssembler;
+use crate::prefix_rule::PrefixRule;
+use crate::prefix_rule_manager::PrefixRuleManager;
 
 #[derive(Debug, Deserialize)]
 struct PrefixConfigPayload {
@@ -35,7 +36,7 @@ impl From<PrefixConfigPayload> for PrefixRule {
 
 #[derive(Debug, Serialize, Deserialize)]
 struct NumberResponse {
-    number: String,
+    number: String, 
 }
 
 async fn generate_number(
@@ -49,7 +50,7 @@ async fn generate_number(
     let prefix_rule = {
         let prefix_rule_manager_clone = prefix_rule_manager.clone();
         let manager = prefix_rule_manager_clone.lock().unwrap();
-        manager.get_prefix_rule(&prefix_key)
+        manager.get_prefix_rule(&prefix_key).await
             .map_err(|e| actix_web::error::ErrorInternalServerError(e))?
     };
 
@@ -78,7 +79,7 @@ async fn register_prefix(
 
     let prefix_rule_manager_clone = prefix_rule_manager.clone();
     let mut manager = prefix_rule_manager_clone.lock().unwrap();
-    manager.register_prefix_rule(prefix_rule)
+    manager.register_prefix_rule(prefix_rule).await
         .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
 
     Ok(HttpResponse::Ok().finish())
