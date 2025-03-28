@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use redis::{Client, Commands};
+use redis::{Client, Commands, ConnectionLike};
 use serde_json;
 use std::error::Error;
 
@@ -14,6 +14,7 @@ pub struct RedisPrefixRuleManager {
 impl RedisPrefixRuleManager {
     pub fn new(redis_url: String) -> Result<Self, Box<dyn Error>> {
         let client = Client::open(redis_url.clone())?;
+        client.get_connection()?;
         Ok(RedisPrefixRuleManager {
             client,
             redis_url,
@@ -41,6 +42,59 @@ impl PrefixRuleManager for RedisPrefixRuleManager {
             }
             None => Ok(None),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use redis::Commands;
+    use crate::prefix_rule_manager::PrefixRuleManager;
+
+    #[test]
+    fn test_register_and_get_prefix_rule() -> Result<(), Box<dyn Error>> {
+        let redis_url = "redis://127.0.0.1/";
+        let manager = RedisPrefixRuleManager::new(redis_url.to_string())?;
+
+        let prefix_rule = PrefixRule {
+            prefix_key: "TEST".to_string(),
+            format: "TEST-{SEQ:4}".to_string(),
+            seq_length: 4,
+            initial_seq: 1,
+        };
+
+        PrefixRuleManager::register_prefix_rule(&manager, prefix_rule.clone())?;
+
+        let retrieved_prefix_rule = PrefixRuleManager::get_prefix_rule(&manager, "TEST")?.unwrap();
+        assert_eq!(prefix_rule.prefix_key, retrieved_prefix_rule.prefix_key);
+        assert_eq!(prefix_rule.format, retrieved_prefix_rule.format);
+        assert_eq!(prefix_rule.seq_length, retrieved_prefix_rule.seq_length);
+        assert_eq!(prefix_rule.initial_seq, retrieved_prefix_rule.initial_seq);
+
+        // Clean up the test data
+        let mut conn = manager.client.get_connection()?;
+        let key = format!("prefix_rule:{}", prefix_rule.prefix_key);
+        conn.del(key.as_str())?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_non_existent_prefix_rule() -> Result<(), Box<dyn Error>> {
+        let redis_url = "redis://127.0.0.1/";
+        let manager = RedisPrefixRuleManager::new(redis_url.to_string())?;
+
+        let retrieved_prefix_rule = PrefixRuleManager::get_prefix_rule(&manager, "NON_EXISTENT")?;
+        assert!(retrieved_prefix_rule.is_none());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_redis_connection_error() {
+        let redis_url = "redis://127.0.0.1:1234/";
+        let result = RedisPrefixRuleManager::new(redis_url.to_string());
+        assert!(!result.is_ok());
     }
 }
 
