@@ -1,18 +1,15 @@
 use actix_web::{web, App, HttpResponse, HttpServer, Responder, Result};
 use serde::{Deserialize, Serialize};
-use std::{sync::Arc, fs::{File, OpenOptions}, io::Write, error::Error};
+use std::{sync::Arc, sync::Mutex};
 
 mod prefix_rule_manager;
 mod sequence_generator;
-use tracing::{info, error};
 mod number_assembler;
 mod redis_prefix_rule_manager;
-use std::io::{ErrorKind, self};
-use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
-use prefix_rule_manager::{PrefixRuleManager};
+use prefix_rule_manager::PrefixRuleManager;
 use crate::redis_prefix_rule_manager::RedisPrefixRuleManager;
-use sequence_generator::{SequenceGenerator, InMemorySequenceGenerator};
+use sequence_generator::{SequenceGenerator, RedisSequenceGenerator};
 use number_assembler::NumberAssembler;
 use crate::prefix_rule_manager::PrefixRule;
 
@@ -43,18 +40,22 @@ struct NumberResponse {
 
 async fn generate_number(
     prefix_key: web::Path<String>,
-    prefix_rule_manager: web::Data<Arc<dyn PrefixRuleManager + Send + Sync>>,
-    sequence_generator: web::Data<Arc<dyn SequenceGenerator + Send + Sync>>,
+    prefix_rule_manager: web::Data<Arc<Mutex<dyn PrefixRuleManager + Send + Sync>>>,
+    sequence_generator: web::Data<Arc<RedisSequenceGenerator>>,
     number_assembler: web::Data<Arc<NumberAssembler>>,
 ) -> Result<impl Responder> {
     let prefix_key = prefix_key.into_inner();
 
-    let prefix_rule = prefix_rule_manager.get_prefix_rule(&prefix_key)
-        .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
+    let prefix_rule = {
+        let prefix_rule_manager_clone = prefix_rule_manager.clone();
+        let manager = prefix_rule_manager_clone.lock().unwrap();
+        manager.get_prefix_rule(&prefix_key)
+            .map_err(|e| actix_web::error::ErrorInternalServerError(e))?
+    };
 
     match prefix_rule {
         Some(config) => {
-            let sequence = sequence_generator.generate(&prefix_key)
+            let sequence = sequence_generator.generate(&prefix_key).await
                 .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
 
             let number = number_assembler.assemble_number(&prefix_key, &config, sequence)
@@ -69,29 +70,36 @@ async fn generate_number(
 async fn register_prefix(
     prefix_key: web::Path<String>,
     payload: web::Json<PrefixConfigPayload>,
-    prefix_rule_manager: web::Data<Arc<dyn PrefixRuleManager + Send + Sync>>,
+    prefix_rule_manager: web::Data<Arc<Mutex<dyn PrefixRuleManager + Send + Sync>>>,
 ) -> Result<impl Responder> {
     let prefix_key = prefix_key.into_inner();
     let mut prefix_rule: PrefixRule = payload.into_inner().into();
     prefix_rule.prefix_key = prefix_key.clone();
 
-    prefix_rule_manager.register_prefix_rule(prefix_rule)
+    let prefix_rule_manager_clone = prefix_rule_manager.clone();
+    let mut manager = prefix_rule_manager_clone.lock().unwrap();
+    manager.register_prefix_rule(prefix_rule)
         .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
 
     Ok(HttpResponse::Ok().finish())
 }
 
-
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let redis_url = "redis://localhost:6379/".to_string();
-    let prefix_rule_manager: Arc<dyn PrefixRuleManager + Send + Sync> = Arc::new(RedisPrefixRuleManager::new(redis_url.clone()).unwrap());
-    let sequence_generator: Arc<dyn SequenceGenerator + Send + Sync> = Arc::new(InMemorySequenceGenerator::new());
+    let prefix_rule_manager: Arc<Mutex<dyn PrefixRuleManager + Send + Sync>> = {
+        let redis_prefix_rule_manager = RedisPrefixRuleManager::new(redis_url.clone()).unwrap();
+        Arc::new(Mutex::new(redis_prefix_rule_manager))
+    };
+    let sequence_generator: Arc<RedisSequenceGenerator> = {
+        let redis_sequence_generator = RedisSequenceGenerator::new(redis_url.clone(), prefix_rule_manager.clone() as Arc<Mutex<dyn PrefixRuleManager + Send + Sync>>).unwrap();
+        Arc::new(redis_sequence_generator)
+    };
     let number_assembler = Arc::new(NumberAssembler::new());
 
-    let prefix_rule_manager_data = web::Data::new(prefix_rule_manager);
+    let prefix_rule_manager_data: web::Data<Arc<Mutex<dyn PrefixRuleManager + Send + Sync>>> = web::Data::new(prefix_rule_manager.clone());
     let sequence_generator_data = web::Data::new(sequence_generator);
-    let number_assembler_data = web::Data::new(number_assembler);
+    let number_assembler_data = web::Data::new(number_assembler.clone());
 
     HttpServer::new(move || {
         App::new()
@@ -99,7 +107,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(sequence_generator_data.clone())
             .app_data(number_assembler_data.clone())
             .route("/api/numbers/{prefixKey}", web::get().to(generate_number))
-                .route("/api/prefix-configs/{prefixKey}", web::put().to(register_prefix))
+            .route("/api/prefix-configs/{prefixKey}", web::put().to(register_prefix))
     })
     .bind(("0.0.0.0", 8080))?
     .run()
@@ -112,7 +120,6 @@ mod tests {
     use actix_web::{test, web, App};
     use actix_web::http::StatusCode;
     use serde_json::json;
-    use crate::prefix_rule_manager::{PrefixRule};
 
     #[actix_web::test]
     async fn test_register_and_generate_number() {
@@ -121,11 +128,17 @@ mod tests {
         let mut conn = client.get_connection().unwrap();
         let _ : () = redis::cmd("FLUSHDB").execute(&mut conn);
 
-        let prefix_rule_manager: Arc<dyn PrefixRuleManager + Send + Sync> = Arc::new(RedisPrefixRuleManager::new(redis_url.clone()).unwrap());
-        let sequence_generator: Arc<dyn SequenceGenerator + Send + Sync> = Arc::new(InMemorySequenceGenerator::new());
+         let prefix_rule_manager: Arc<Mutex<dyn PrefixRuleManager + Send + Sync>> = {
+            let redis_prefix_rule_manager = RedisPrefixRuleManager::new(redis_url.clone()).unwrap();
+            Arc::new(Mutex::new(redis_prefix_rule_manager))
+        };
+        let sequence_generator: Arc<RedisSequenceGenerator> = {
+            let redis_sequence_generator = RedisSequenceGenerator::new(redis_url.clone(), prefix_rule_manager.clone()).unwrap();
+            Arc::new(redis_sequence_generator)
+        };
         let number_assembler = Arc::new(NumberAssembler::new());
 
-        let prefix_rule_manager_data = web::Data::new(prefix_rule_manager.clone());
+        let prefix_rule_manager_data = web::Data::new(prefix_rule_manager.clone() as Arc<Mutex<dyn PrefixRuleManager + Send + Sync>>);
         let sequence_generator_data = web::Data::new(sequence_generator.clone());
         let number_assembler_data = web::Data::new(number_assembler.clone());
 

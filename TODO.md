@@ -15,10 +15,6 @@
   - [ ] Implement generate number interface: `GET /api/numbers`
 - [ ] **Monitoring and Alerting**:
   - [ ] Collect performance indicators, monitor numbers and generate health status (using Prometheus + Grafana).
-- [x] **Implement Unit Tests**
-  - [x] Prefix format validator
-  - [x] Sequence generator
-  - [x] Error handler
 - [ ] **Implement End-to-End Tests**
   - [ ] Hurl functional tests
   - [ ] k6 performance tests
@@ -27,3 +23,6 @@
   - [ ] Redis is unavailable: Switch to local segment cache (pre-allocate 1000), retry the connection periodically, incremental synchronization.
   - [ ] Service node downtime: Traffic automatically switches to healthy nodes, K8s automatically restarts containers.
   - [ ] Network partitioning: Using local clock to generate temporary numbers (including tags), manual intervention conflict resolution.
+- [ ] **Dynamic prefix rules**: Allows you to freely define numbering formats (such as embedding dates, business labels) without modifying the code.
+- [ ] **Efficient concurrency control**: In high-concurrency scenarios, ensure that the numbers are globally unique and continuous (you can configure whether they are strictly continuous).
+- [ ] **No single point of failure**: Supports distributed deployment to avoid dependence on a single service or data storage.
