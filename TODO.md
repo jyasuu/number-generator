@@ -1,0 +1,29 @@
+## TODO
+
+- [ ] **Prefix Rule Manager**:
+  - [ ] Store and manage dynamic prefix formats and sequence configurations (using Redis Hash / Relational Database).
+  - [ ] Implement registration rules: `PUT /prefix-configs/{prefixKey}`
+  - [ ] Implement query rule: `GET /prefix-configs/{prefixKey}`
+- [ ] **Sequence Generator**:
+  - [ ] Generate unique incrementing values, support atomic operations (using Redis INCR / Distributed Lock).
+  - [ ] Implement concurrency control strategies:
+    - [ ] Redis atomic operations (`INCR`) for low latency + slight number skipping.
+    - [ ] Database row lock + optimistic lock retry for strict continuity.
+    - [ ] Snowflake algorithm transformation for distributed high availability.
+- [ ] **Number Assembler**:
+  - [ ] Format the prefix and sequence value as the final number according to the rules (application layer string processing logic).
+  - [ ] Implement generate number interface: `GET /api/numbers`
+- [ ] **Monitoring and Alerting**:
+  - [ ] Collect performance indicators, monitor numbers and generate health status (using Prometheus + Grafana).
+- [ ] **Implement Unit Tests**
+  - [ ] Prefix format validator
+  - [ ] Sequence generator
+  - [ ] Error handler
+- [ ] **Implement End-to-End Tests**
+  - [ ] Hurl functional tests
+  - [ ] k6 performance tests
+  - [ ] Security Testing
+- [ ] **Fault-tolerant design**:
+  - [ ] Redis is unavailable: Switch to local segment cache (pre-allocate 1000), retry the connection periodically, incremental synchronization.
+  - [ ] Service node downtime: Traffic automatically switches to healthy nodes, K8s automatically restarts containers.
+  - [ ] Network partitioning: Using local clock to generate temporary numbers (including tags), manual intervention conflict resolution.
