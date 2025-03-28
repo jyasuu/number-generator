@@ -36,7 +36,7 @@ impl From<PrefixConfigPayload> for PrefixRule {
 
 #[derive(Debug, Serialize, Deserialize)]
 struct NumberResponse {
-    number: String, 
+    number: String,
 }
 
 async fn generate_number(
@@ -50,7 +50,7 @@ async fn generate_number(
     let prefix_rule = {
         let prefix_rule_manager_clone = prefix_rule_manager.clone();
         let manager = prefix_rule_manager_clone.lock().unwrap();
-        manager.get_prefix_rule(&prefix_key).await
+        manager.get_prefix(&prefix_key).await
             .map_err(|e| actix_web::error::ErrorInternalServerError(e))?
     };
 
@@ -79,7 +79,7 @@ async fn register_prefix(
 
     let prefix_rule_manager_clone = prefix_rule_manager.clone();
     let mut manager = prefix_rule_manager_clone.lock().unwrap();
-    manager.register_prefix_rule(prefix_rule).await
+    manager.register_prefix(prefix_rule).await
         .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
 
     Ok(HttpResponse::Ok().finish())
@@ -129,7 +129,7 @@ mod tests {
         let mut conn = client.get_connection().unwrap();
         let _ : () = redis::cmd("FLUSHDB").execute(&mut conn);
 
-         let prefix_rule_manager: Arc<Mutex<dyn PrefixRuleManager + Send + Sync>> = {
+        let prefix_rule_manager: Arc<Mutex<dyn PrefixRuleManager + Send + Sync>> = {
             let redis_prefix_rule_manager = RedisPrefixRuleManager::new(redis_url.clone()).unwrap();
             Arc::new(Mutex::new(redis_prefix_rule_manager))
         };
