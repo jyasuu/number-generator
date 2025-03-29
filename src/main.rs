@@ -50,7 +50,7 @@ async fn generate_number(
     let prefix_rule = {
         let prefix_rule_manager_clone = prefix_rule_manager.clone();
         let manager = prefix_rule_manager_clone.lock().unwrap();
-        manager.get_prefix(&prefix_key).await
+        manager.get_prefix(prefix_key.clone()).await
             .map_err(|e| actix_web::error::ErrorInternalServerError(e))?
     };
 
@@ -79,7 +79,7 @@ async fn register_prefix(
 
     let prefix_rule_manager_clone = prefix_rule_manager.clone();
     let mut manager = prefix_rule_manager_clone.lock().unwrap();
-    manager.register_prefix(prefix_rule).await
+    manager.register_prefix(prefix_key.clone(), prefix_rule).await
         .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
 
     Ok(HttpResponse::Ok().finish())

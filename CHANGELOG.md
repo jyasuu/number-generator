@@ -1,3 +1,6 @@
 ## Changelog
 
-- Implemented RedisPrefixRuleManager with unit tests.
+- Implemented dynamic prefix rules
+    - Implemented PrefixRuleManager trait
+    - Implemented RedisPrefixRuleManager
+    - Updated main.rs to use the PrefixRuleManager trait

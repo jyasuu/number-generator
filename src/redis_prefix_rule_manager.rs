@@ -45,18 +45,18 @@ impl RedisPrefixRuleManager {
 
 #[async_trait]
 impl PrefixRuleManager for RedisPrefixRuleManager {
-    async fn register_prefix(&self, prefix_rule: PrefixRule) -> Result<(), Box<dyn std::error::Error>> {
+    async fn register_prefix(&self, prefix_key: String, prefix_rule: PrefixRule) -> Result<(), Box<dyn std::error::Error>> {
         let mut conn = self.redis_client.get_connection().map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
-        let redis_key = Self::get_redis_key(&prefix_rule.prefix_key);
+        let redis_key = Self::get_redis_key(&prefix_key);
         let prefix_rule_json = serde_json::to_string(&prefix_rule).map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
         conn.set(redis_key, prefix_rule_json).map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
 
         Ok(())
     }
 
-    async fn get_prefix(&self, prefix_key: &str) -> Result<Option<PrefixRule>, Box<dyn std::error::Error>> {
+    async fn get_prefix(&self, prefix_key: String) -> Result<Option<PrefixRule>, Box<dyn std::error::Error>> {
         let mut conn = self.redis_client.get_connection().map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
-        let redis_key = Self::get_redis_key(prefix_key);
+        let redis_key = Self::get_redis_key(&prefix_key);
         let prefix_rule_json: Option<String> = conn.get(redis_key).map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
 
         match prefix_rule_json {

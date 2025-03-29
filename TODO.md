@@ -1,8 +1,17 @@
 ## TODO
 
 - [ ] Implement dynamic prefix rules
+    - [ ] Store and manage dynamic prefix formats and sequence configurations
+        - [ ] Redis Hash / Relational Database
+    - [ ] Operation Interface
+        - [ ] Registration rules: `PUT /api/prefix-configs/{prefixKey}`
+        - [ ] Query rule: `GET /api/prefix-configs/{prefixKey}`
 - [ ] Implement efficient concurrency control
+    - [ ] Redis atomic operations (`INCR`)
+    - [ ] Database row lock + optimistic lock retry
+    - [ ] Based on Snowflake algorithm transformation
 - [ ] Implement no single point of failure
+    - [ ] Supports distributed deployment to avoid dependence on a single service or data storage.
 - [ ] Implement Prefix Rule Manager
     - [ ] Registration rules: `PUT /prefix-configs/{prefixKey}`
     - [ ] Query rule: `GET /prefix-configs/{prefixKey}`
@@ -11,20 +20,51 @@
     - [ ] Database row lock + optimistic lock retry
     - [ ] Based on Snowflake algorithm transformation
 - [ ] Implement Number Assembler
+    - [ ] Format the prefix and sequence value as the final number according to the rules
 - [ ] Implement Monitoring and Alerting
+    - [ ] Collect performance indicators, monitor numbers and generate health status
+    - [ ] Prometheus + Grafana
 - [ ] Implement Generate Number Interface
     - [ ] `GET /api/numbers`
 - [ ] Implement Prefix rule management interface
     - [ ] `PUT /api/prefix-configs/{prefixKey}`
 - [ ] Implement Fault-tolerant design
     - [ ] Redis is unavailable
+        - [ ] Switch to local segment cache (pre-allocate 1000)
+        - [ ] Retry the connection periodically, incremental synchronization
     - [ ] Service node downtime
+        - [ ] Traffic automatically switches to healthy nodes
+        - [ ] K8s automatically restarts containers
     - [ ] Network partitioning
+        - [ ] Using local clock to generate temporary numbers (including tags)
+        - [ ] Manual intervention conflict resolution
 - [ ] Implement Unit Tests
     - [ ] prefix format validator
+        - [ ] Validation of legal format
+        - [ ] Illegal format rejection
+        - [ ] Dynamic variable expansion
+        - [ ] Boundary length test
     - [ ] sequence generator
+        - [ ] Atomic increment verification
+        - [ ] Initial sequence processing
+        - [ ] Uniqueness across nodes
+        - [ ] Sequence overflow handling
     - [ ] error handler
+        - [ ] Prefix not registered error
+        - [ ] Storage layer connection failure
+        - [ ] Input parameter validation
 - [ ] Implement End-to-end tests
     - [ ] Hurl functional test
+        - [ ] Successful registration and generation
+        - [ ] Error handling process
+        - [ ] Idempotence verification
+        - [ ] Cross-prefix isolation
     - [ ] k6 performance test
+        - [ ] Benchmark Load Test
+        - [ ] Peak traffic test
+        - [ ] Endurance test
+        - [ ] Fault recovery test
     - [ ] Security Testing
+        - [ ] Unauthorized access
+        - [ ] Input Injection Attack
+        - [ ] Sensitive log mask
