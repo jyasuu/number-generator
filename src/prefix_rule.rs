@@ -6,4 +6,5 @@ pub struct PrefixRule {
     pub format: String,
     pub seq_length: u32,
     pub initial_seq: u64,
+    pub network_partition: bool,
 }

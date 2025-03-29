@@ -36,6 +36,10 @@ impl NumberAssembler {
             }
         }
 
+        if prefix_rule.network_partition {
+            formatted_number = format!("{}-NP", formatted_number);
+        }
+
         Ok(formatted_number)
     }
 }
@@ -54,6 +58,7 @@ mod tests {
             format: "TEST-{year}-{SEQ:4}".to_string(),
             seq_length: 4,
             initial_seq: 1,
+            network_partition: false,
         };
         let sequence = 123;
 
@@ -72,6 +77,7 @@ mod tests {
             format: "{prefix}-{SEQ:6}".to_string(),
             seq_length: 6,
             initial_seq: 1,
+            network_partition: false,
         };
         let sequence = 456;
 
